@@ -23,6 +23,7 @@ on:
         required: true
         default: 'nocombine'
 
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   # This workflow contains a single job called "combine-prs"
   combine-prs:
@@ -55,6 +56,7 @@ jobs:
                   const stateQuery = `query($owner: String!, $repo: String!, $pull_number: Int!) {
                     repository(owner: $owner, name: $repo) {
                       pullRequest(number:$pull_number) {
+                        mergeable
                         commits(last: 1) {
                           nodes {
                             commit {
@@ -72,14 +74,28 @@ jobs:
                     repo: context.repo.repo,
                     pull_number: pull['number']
                   };
+
                   const result = await github.graphql(stateQuery, vars);
                   const [{ commit }] = result.repository.pullRequest.commits.nodes;
-                  const state = commit.statusCheckRollup.state
-                  console.log('Validating status: ' + state);
-                  if(state != 'SUCCESS') {
-                    console.log('Discarding ' + branch + ' with status ' + state);
-                    statusOK = false;
+
+                  if(commit.statusCheckRollup != null){
+                    const state = commit.statusCheckRollup.state
+                    console.log('Validating status: ' + state);
+
+                    if(state != 'SUCCESS') {
+                      console.log('Discarding ' + branch + ' with status ' + state);
+                      statusOK = false;
+                    }
+                  } else {
+                    const mergeable = result.repository.pullRequest.mergeable
+                    console.log('PR does not have statusCheckRollup, but mergeability is: ' + mergeable);
+
+                    if(mergeable !== 'MERGEABLE'){
+                      console.log('Discarding ' + branch + ' with mergeability: ' + mergeable);
+                      statusOK = false;
+                    }
                   }
+
                 }
                 console.log('Checking labels: ' + branch);
                 const labels = pull['labels'];
@@ -104,49 +120,4 @@ jobs:
               core.setFailed('No PRs/branches matched criteria');
               return;
             }
-            try {
-              await github.rest.git.createRef({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                ref: 'refs/heads/' + '${{ github.event.inputs.combineBranchName }}',
-                sha: baseBranchSHA
-              });
-            } catch (error) {
-              console.log(error);
-              core.setFailed('Failed to create combined branch - maybe a branch by that name already exists?');
-              return;
-            }
-            
-            let combinedPRs = [];
-            let mergeFailedPRs = [];
-            for(const { branch, prString } of branchesAndPRStrings) {
-              try {
-                await github.rest.repos.merge({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  base: '${{ github.event.inputs.combineBranchName }}',
-                  head: branch,
-                });
-                console.log('Merged branch ' + branch);
-                combinedPRs.push(prString);
-              } catch (error) {
-                console.log('Failed to merge branch ' + branch);
-                mergeFailedPRs.push(prString);
-              }
-            }
-            
-            console.log('Creating combined PR');
-            const combinedPRsString = combinedPRs.join('\n');
-            let body = '✅ This PR was created by the Combine PRs action by combining the following PRs:\n' + combinedPRsString;
-            if(mergeFailedPRs.length > 0) {
-              const mergeFailedPRsString = mergeFailedPRs.join('\n');
-              body += '\n\n⚠️ The following PRs were left out due to merge conflicts:\n' + mergeFailedPRsString
-            }
-            await github.rest.pulls.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: 'Combined PR',
-              head: '${{ github.event.inputs.combineBranchName }}',
-              base: baseBranch,
-              body: body
-            });
+            console.log("chegou aqui");
