@@ -2,8 +2,8 @@ name: 'Dependabot combined PR'
 
 # Controls when the action will run - in this case it run on every midnight on the 1st day of every month  AND  it also can be triggered manually
 on:
-  schedule:
-    - cron: '*/5 * * * *'
+  #schedule:
+    #- cron: '*/5 * * * *'
   workflow_dispatch:
     inputs:
       branchPrefix:
